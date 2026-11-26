@@ -2,117 +2,137 @@
 
 A small lakehouse built as the project of the course **SDA-DSC-214: Modern Data Engineering for AI Systems** at SDAIA Academy.
 
-- Author: Rahaf Alharbi
-- Date: 2026-11-26
+- Author: `Rahaf Alharbi`
+- Date: `2026-11-26`
 - Official SDAIA Academy GitHub: [github.com/SDAIAAcademy](https://github.com/SDAIAAcademy)
 - Course starting repository: [altherwy/masar-lakehouse](https://github.com/altherwy/masar-lakehouse)
 
 ## What this project is
 
-Masar is a fictional ride-hailing company in Saudi Arabia. The project uses synthetic trip, driver, and GPS data for five cities. It turns raw files into Delta tables for analytics using three layers: Bronze, Silver, and Gold. The capstone produces a table for BI reporting. The course also includes separate streaming and machine-learning exercises.
+Masar is a made-up ride-hailing company in Saudi Arabia. The data is synthetic: trips, drivers and GPS pings for five cities. This project turns that raw data into trusted tables that serve both dashboards (BI) and machine learning (AI), following the lakehouse pattern: open file formats, a transaction log for reliability, and three layers of increasing quality.
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    Raw["Raw trip, driver and GPS files"] --> Bronze["Bronze Delta tables"]
-    Bronze --> Silver["Silver trips built with dbt"]
-    Silver --> Quality["Quality checks and Delta constraints"]
-    Quality --> Demand["Gold hourly demand"]
-    Quality --> BI["BI trips table"]
 ```
-
-Bronze keeps the source records as they arrived. Silver cleans and validates the trips. Gold summarizes demand by city, date, and hour. The BI table uses pseudonymized rider and driver IDs and less precise drop-off locations.
+ CSV / JSON files ----\
+                       +--> BRONZE (raw, kept as it arrived, Delta)
+ Kafka GPS stream ----/            |
+                                   v
+                     dbt model + checks --> SILVER (clean, enforced, Delta)
+                                   |
+                  quality contract --+--> GOLD (marts and features)
+                                                |
+                                +---------------+---------------+
+                                v                               v
+                       BI-safe table                     Training set
+                  (pseudonymised, no raw ids)         (point-in-time features)
+```
 
 ## What I built
 
-| Day | Topic | Course work and capstone implementation |
+| Day | Topic | What is in the repository |
 | --- | --- | --- |
-| 1 | Bronze, file formats, and cost | Loaded and profiled raw data. The course also covers file-format and scan-cost comparisons. |
-| 2 | Silver with dbt and Delta | Built Silver with dbt, verified its tests, rejected invalid writes, and added `promo_code` to a demo table. |
-| 3 | Delta changes and streaming | The course covers MERGE, Time Travel, Delta maintenance, and Kafka streaming. The capstone proof reads historical Delta versions. |
-| 4 | Data quality and orchestration | Passed the Silver data contract and connected Bronze, dbt, quality checks, Gold, and BI through `make pipeline`. |
-| 5 | Serving and capstone | Built and checked `bi_trips_safe`, compared Delta versions, and recorded the results in `capstone/SUBMIT.md`. |
+| 1 | Bronze, file formats and cost | Landing script, profiling, a formats lab (the same data in three formats), a scan-cost comparison and a platform cost model |
+| 2 | Silver with dbt, enforced tables | dbt source, staging views, incremental silver model and tests; Delta constraints, a deliberately rejected write, the transaction log, schema evolution |
+| 3 | Reliable changes and streaming | MERGE for corrections, a PDPL rider erasure, time travel, small files with OPTIMIZE and VACUUM, Kafka to Delta streaming with restart and windowed counts |
+| 4 | Trust and one command | Data contract, quality gate, observability (freshness, volume, drift), PII retention, gold marts, one-command pipeline with retries and a failure drill |
+| 5 | Serving and capstone | Training set, BI-safe table, leakage drill; then the capstone: the whole lakehouse rebuilt from a clean state with one command, plus a time-travel proof |
 
 ## Technology
 
 - Python 3.11 and Java 17
 - Apache Spark 3.5.1 and Delta Lake 3.2.0
 - dbt 1.8 with the Spark adapter
-- Apache Kafka 3.7.0 for the separate streaming exercise
+- Apache Kafka 3.7.0 (single broker, run with Docker)
 - Great Expectations 0.18.19
-- GitHub Codespaces
+- GitHub Codespaces as the development environment
 
 ## Project structure
 
-| Path | Purpose |
-| --- | --- |
-| `src/masar/ingest/` | Load and profile Bronze data |
-| `src/masar/econ/` | File formats, scan cost, and cost modeling |
-| `src/masar/delta/` | Constraints, MERGE, Time Travel, and file maintenance |
-| `src/masar/stream/` | Kafka producer and streaming ingestion |
-| `src/masar/quality/` | Data contract, quality gate, observability, and retention |
-| `src/masar/transform/` | Gold tables |
-| `src/masar/serve/` | BI table and training set exercises |
-| `src/masar/pipeline.py` | Run the capstone pipeline |
-| `dbt/masar/` | dbt staging models, Silver models, and tests |
-| `capstone/` | Capstone brief, submission, and expected counts |
-| `Makefile` | Commands such as `make data` and `make pipeline` |
+```
+src/masar/
+  ingest/       landing raw files into bronze
+  econ/         formats lab, scan cost and cost model
+  delta/        constraints, MERGE, time travel, small files
+  stream/       Kafka producer and streaming ingest
+  quality/      data contract, gate, observability, PII retention
+  transform/    gold tables
+  serve/        training set and BI-safe table
+  pipeline.py   the one-command pipeline
+dbt/masar/      dbt staging and silver models and tests
+capstone/       capstone brief, submission notes and expected counts
+Makefile        shortcuts such as make data and make pipeline
+```
 
 ## How to run it
 
-Open the repository in GitHub Codespaces. Run these commands from the repository root and wait for each one to finish.
+The data is not stored in this repository. You generate it with the steps below. Run each command from the repository root and wait for it to finish: only one Spark session can run at a time.
 
-```bash
-export PYTHONPATH="$PWD/src"
-make doctor
-make data
-make dbt-deps
-make pipeline
-```
+1. Open the repository in a GitHub Codespace (Code button, then Codespaces, then Create). Wait until the setup finishes.
+2. Check the environment:
+   ```bash
+   make doctor
+   ```
+3. Generate the dataset:
+   ```bash
+   make data
+   ```
+4. Land the raw files into bronze (run this once only):
+   ```bash
+   python -m masar.ingest.land_bronze
+   ```
+5. Register the bronze tables and install dbt packages:
+   ```bash
+   make register
+   make dbt-deps
+   ```
+6. Build and test the silver table, then add the Delta constraints:
+   ```bash
+   cd dbt/masar && dbt build --select +silver_trips && cd ../..
+   python -m masar.delta.enforce_silver
+   ```
+7. Run the whole pipeline (silver, quality check, gold, maintenance):
+   ```bash
+   make pipeline
+   ```
+8. Serve the two consumers:
+   ```bash
+   python -m masar.serve.training_join
+   python -m masar.serve.bi_view
+   ```
 
-`make pipeline` loads and registers Bronze, builds and tests Silver with dbt, checks data quality, adds any missing Delta constraints, builds the Gold and BI tables, and prints row counts.
+Optional parts, each run on its own:
 
-I skip Bronze ingestion when all three Bronze Delta tables already exist. The landing script appends rows, so skipping this step avoids loading the same records twice. The pipeline stops if only some Bronze tables exist or if a required stage fails.
-
-For the separate streaming exercise, use `make kafka-up` to start Kafka and `make kafka-down` when finished.
-
-For a clean-state run, `make clean-lakehouse` removes the generated tables and their local history, the Spark metastore, and dbt build artifacts. It keeps `data/`. Run `make pipeline` after the cleanup.
+- Day 3 streaming needs Kafka: start it with `make kafka-up`, then follow the streaming files in `src/masar/stream/`. Stop it with `make kafka-down` when you are done.
+- Rebuild everything from scratch: `make clean-lakehouse`, then run the steps above again from step 4. This deletes `lakehouse/` and keeps `data/`.
 
 ## Capstone
 
-The [capstone brief](capstone/CAPSTONE.md) defines the tasks. See the [expected counts](capstone/checks/expected_counts.md) for the checkpoints and the [submission](capstone/SUBMIT.md) for the observed results.
+The capstone rebuilds the lakehouse from an empty `lakehouse/` folder and proves it. The brief is in `capstone/CAPSTONE.md` and the counts to compare against are in `capstone/checks/expected_counts.md`. In short:
 
-1. Load and register Bronze.
-2. Build Silver with dbt and pass the quality gate.
-3. Test a Delta constraint and demonstrate a schema change.
-4. Build a Gold mart.
-5. Build a consumer table. I chose the BI table.
-6. Run the full workflow with `make pipeline` from a clean state.
-7. Report row counts and demonstrate Delta Time Travel.
-8. Complete `capstone/SUBMIT.md` and submit the GitHub branch.
+1. Land bronze and register it.
+2. Build silver with dbt and pass the quality gate.
+3. Add one Delta constraint and one schema change.
+4. Build a gold mart.
+5. Build a consumer table (BI-safe table or training set).
+6. Run everything with `make pipeline` from a clean state.
+7. Show the counts per layer and one time-travel query on silver.
+8. Fill in `capstone/SUBMIT.md` and submit.
 
 ## Results
 
-| Output | Rows |
-| --- | ---: |
-| Bronze trips | 48,200 |
-| Bronze drivers | 1,850 |
-| Bronze GPS pings | 120,000 |
-| Silver trips | 44,371 |
-| Gold hourly demand | 120 |
-| BI-safe trips | 44,371 |
-
-- **Quality.** All seven Silver data-contract checks passed. The dbt build and tests completed successfully.
-- **Delta controls.** Delta rejected a negative fare and a fare submitted as text. I added `promo_code` to a demo table and verified that the old rows were retained.
-- **Pipeline.** `make pipeline` completed in Codespaces with Bronze already loaded. A clean-state run remains to be verified.
-- **BI.** The BI table was checked for the raw fields `rider_id`, `driver_id`, and `dropoff_geohash`. None were present.
-- **Time Travel.** The main Silver table had 44,371 rows in both versions 0 and 5. In a separate demo copy, the count changed from 44,371 in version 0 to 44,370 in version 1 after deleting one trip.
+- Bronze: 48,200 trips, 1,850 drivers, 120,000 GPS pings
+- Silver: about 44,371 trips (44,364 if you also ran the Day 3 erase of one rider and have not yet re-run the pipeline)
+- Data contract on silver: 7 of 7 rules pass
+- Gold demand table: 120 rows (5 cities x 24 hours); gold features: one row per trip
+- Pipeline: runs twice with identical counts, and recovers after an injected failure
+- BI table: no raw rider or driver ids; the same number of pseudonyms as riders
+- Time travel: an older version of silver has a different row count from the latest one
 
 ## Limits of this project
 
-This teaching lakehouse runs on one machine with synthetic data. The capstone uses file-based ingestion and a manually triggered pipeline. Kafka streaming runs as a separate course exercise.
+This is a teaching lakehouse on one machine with synthetic data. It is not production-ready: it has no real catalog or access control, no scheduler or alerting, and the streaming part is not connected to the main pipeline.
 
 ## Acknowledgements
 
-Built during SDA-DSC-214 at [SDAIA Academy](https://github.com/SDAIAAcademy), starting from the course repository linked above.
+Built during SDA-DSC-214 at [SDAIA Academy](https://github.com/SDAIAAcademy), starting from the course repository above.
