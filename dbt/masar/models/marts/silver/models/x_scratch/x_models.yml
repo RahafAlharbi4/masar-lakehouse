@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: x_silver_copy
+    columns:
+      - name: city
+        data_tests:
+          - unique
+          - accepted_values:
+              values: ['Riyadh', 'Jeddah', 'Dammam', 'Mecca']
+
+      - name: fare_sar
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 30
+
+      - name: dropoff_geohash
+        data_tests:
+          - not_null

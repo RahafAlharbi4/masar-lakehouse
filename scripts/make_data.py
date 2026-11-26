@@ -2,6 +2,9 @@
 """Generate the synthetic Masar dataset. Same --seed, same data, on every laptop.
 
     python scripts/make_data.py --seed 42
+    python scripts/make_data.py --seed 43 --ratings-only
+
+The --ratings-only option reads existing raw trips and creates trip_ratings.csv.
 
 Writes (all git-ignored):
   data/raw/drivers.csv                     driver master data
@@ -124,6 +127,7 @@ def make_pings(rng, trips, n_trips=1000, per_trip=120, step_s=10, late_share=0.0
 
 def write_fixtures(rng, trips, day, out):
     import pandas as pd  # only needed for parquet fixtures
+
     fx = out / "fixtures"
     fx.mkdir(parents=True, exist_ok=True)
 
@@ -155,7 +159,8 @@ def write_fixtures(rng, trips, day, out):
     # one trip that arrives two days after it happened (lookback drill)
     late_start = day - timedelta(days=2) + timedelta(hours=10, minutes=15)
     late = {"trip_id": "T-900001", "driver_id": "D-0001", "rider_id": "rider_00042", "city": "Riyadh",
-            "start_ts": late_start.strftime(TS), "end_ts": (late_start + timedelta(minutes=22)).strftime(TS),
+            "start_ts": late_start.strftime(TS),
+            "end_ts": (late_start + timedelta(minutes=22)).strftime(TS),
             "distance_km": 11.4, "fare_sar": 58.5, "status": "completed", "surge_multiplier": 1.0,
             "payment_method": "card", "dropoff_geohash": "7zabcd"}
     write_csv(fx / "late_trip.csv", [late], RAW_TRIP_COLUMNS)
@@ -164,6 +169,31 @@ def write_fixtures(rng, trips, day, out):
     corr = [{"trip_id": t["trip_id"], "fare_sar": round(float(t["fare_sar"]) + 2.5, 2)} for t in done[:5]]
     write_csv(fx / "corrections.csv", corr, ["trip_id", "fare_sar"])
     (fx / "erasure_request.json").write_text(json.dumps({"rider_id": "rider_00042"}) + "\n")
+
+
+def make_trip_ratings(rng, raw):
+    completed_ids = set()
+
+    for path in sorted(raw.glob("trips_*.csv")):
+        with path.open(newline="", encoding="utf-8") as file:
+            for trip in csv.DictReader(file):
+                if trip["status"] == "completed":
+                    completed_ids.add(trip["trip_id"])
+
+    if not completed_ids:
+        raise SystemExit("No completed trips found in the raw CSV files.")
+
+    trip_ids = rng.sample(sorted(completed_ids), min(1000, len(completed_ids)))
+    output = raw / "trip_ratings.csv"
+
+    with output.open("x", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["trip_id", "rating"])
+        for trip_id in trip_ids:
+            rating = rng.choices([1, 2, 3, 4, 5], weights=[2, 3, 10, 25, 60])[0]
+            writer.writerow([trip_id, rating])
+
+    print(f"wrote {output} with {len(trip_ids):,} ratings")
 
 
 def main():
@@ -175,10 +205,16 @@ def main():
     ap.add_argument("--drivers", type=int, default=1850)
     ap.add_argument("--out", default=str(ROOT / "data"))
     ap.add_argument("--no-fixtures", action="store_true", help="skip parquet fixtures (no pandas/pyarrow needed)")
+    ap.add_argument("--ratings-only", action="store_true", help="generate trip ratings from existing raw trips")
     a = ap.parse_args()
 
     rng = random.Random(a.seed)
     out = Path(a.out)
+
+    if a.ratings_only:
+        make_trip_ratings(rng, out / "raw")
+        return
+
     rel = lambda p: p.relative_to(ROOT) if p.is_relative_to(ROOT) else p  # noqa: E731
     first = datetime.strptime(a.date, "%Y-%m-%d")
 
