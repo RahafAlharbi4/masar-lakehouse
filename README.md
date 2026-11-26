@@ -60,3 +60,17 @@ Generated data (git-ignored):
 | First `get_spark()` is slow or fails | It downloads jars from Maven Central; check your network or proxy |
 | `ModuleNotFoundError: masar` | Run commands through `make` or set `PYTHONPATH=src` |
 | Port 9092 already in use | Stop the other Kafka, or `make kafka-down` |
+
+
+## Masar Capstone
+
+Run the project with `make pipeline`.
+
+- **Bronze** stores the raw trip, driver, and GPS data.
+- **Silver** uses dbt to clean the trips and check data quality.
+- **Gold** summarizes hourly demand by city and provides a BI-ready trips table.
+
+I made the pipeline skip Bronze ingestion when all three tables already exist
+so that rerunning it does not append duplicate rows.
+
+Run results and Delta Time Travel evidence are in [SUBMIT.md](capstone/SUBMIT.md).
